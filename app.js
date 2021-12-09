@@ -2,17 +2,22 @@ const express = require('express')
 const P = require('path');
 
 const app = express()
-const port = 3000
+
 const fs = require('fs');
 console.log(process.argv)
 
-const folder = process.argv[2] ?? P.dirname(__dirname + ".fake");
+const folder = process.argv[2] || P.dirname(__dirname + ".fake");
+const port = parseInt(process.argv[3] | '3000');
 console.log('use static folder:' + folder);
 app.use(express.static(folder))
 
 const sendDirList = (req, res) => {
   const queryPath =  req.query.path || '';
   let path = folder + '\\' + queryPath;
+  if (fs.statSync(path).isFile()) {
+    return res.redirect(queryPath)
+  }
+
   if (!fs.statSync(path).isDirectory()) {
     res.send(`Not support this file`);
     return;
@@ -93,7 +98,44 @@ const sendDirList = (req, res) => {
   `)
 }
 
+const sendVideo = (req, res) => {
+  const videoPath = folder + '\\' + (req.query.path || '');
+  const videoStat = fs.statSync(videoPath);
+  const fileSize = videoStat.size;
+  const videoRange = req.headers.range;
+  if (videoRange) {
+    const parts = videoRange.replace(/bytes=/, "").split("-");
+    const start = parseInt(parts[0], 10);
+    const end = parts[1]
+      ? parseInt(parts[1], 10)
+      : fileSize - 1;
+    const chunksize = (end - start) + 1;
+    const file = fs.createReadStream(videoPath, { start, end });
+    const head = {
+      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': chunksize,
+      'Content-Type': 'video/mp4',
+    };
+    res.writeHead(206, head);
+    file.pipe(res);
+  } else {
+    const head = {
+      'Content-Length': fileSize,
+      'Content-Type': 'video/mp4',
+    };
+    res.writeHead(200, head);
+    fs.createReadStream(videoPath).pipe(res);
+  }
+};
+
 app.get('/', (req, res) => {
+  const queryPath = req.query.path || '';
+  if (queryPath.toUpperCase().endsWith('.MP4')) {
+    sendVideo(req, res);
+    return;
+  }
+
   sendDirList(req, res)
 })
 
